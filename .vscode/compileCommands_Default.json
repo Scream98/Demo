@@ -1,0 +1,18 @@
+[
+	{
+		"file": "C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\GameDemo\\Demo\\Source\\GameDemo\\CS.cpp",
+		"arguments": [
+			"D:\\VisualStudio2026\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
+			"@C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\GameDemo\\Demo\\.vscode\\compileCommands_Default\\GameDemo.0.rsp"
+		],
+		"directory": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Source"
+	},
+	{
+		"file": "C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\GameDemo\\Demo\\Source\\GameDemo\\GameDemo.cpp",
+		"arguments": [
+			"D:\\VisualStudio2026\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
+			"@C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\GameDemo\\Demo\\.vscode\\compileCommands_Default\\GameDemo.0.rsp"
+		],
+		"directory": "C:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Source"
+	}
+]
