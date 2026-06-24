@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "GameDemoEditor Editor Win64 Development (GameDemo)",
+            "compilerPath": "D:\\VisualStudio2026\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "msvc-x64",
+            "compileCommands": [
+                "C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\Demo\\GameDemo\\.vscode\\compileCommands_GameDemo.json"
+            ]
+        },
+        {
+            "name": "Win32",
+            "compilerPath": "D:\\VisualStudio2026\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "msvc-x64",
+            "compileCommands": [
+                "C:\\Users\\kangzhonghua\\Desktop\\VS\\Ugit\\Demo\\GameDemo\\.vscode\\compileCommands_Default.json"
+            ]
+        }
+    ],
+    "version": 4
+}
