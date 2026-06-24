@@ -1,0 +1,14 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "c:\\users\\kangzhonghua\\desktop\\vs\\ugit\\demo\\gamedemo\\source\\gamedemo\\gamedemo.cpp",
+        "ProvidedModule": "",
+        "PCH": "c:\\users\\kangzhonghua\\desktop\\vs\\ugit\\demo\\gamedemo\\intermediate\\build\\win64\\x64\\gamedemoeditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.valexpapi.cpp20.h.pch",
+        "Includes": [
+            "c:\\users\\kangzhonghua\\desktop\\vs\\ugit\\demo\\gamedemo\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\gamedemo\\definitions.gamedemo.h",
+            "c:\\users\\kangzhonghua\\desktop\\vs\\ugit\\demo\\gamedemo\\source\\gamedemo\\gamedemo.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

@@ -1,0 +1,13 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/experimental:deterministic
+/DEF
+/NAME:"UnrealEditor-GameDemo.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"C:/Users/kangzhonghua/Desktop/VS/Ugit/Demo/GameDemo/Intermediate/Build/Win64/x64/GameDemoEditor/Development/UnrealEd/SharedPCH.UnrealEd.Project.ValApi.ValExpApi.Cpp20.h.obj"
+"C:/Users/kangzhonghua/Desktop/VS/Ugit/Demo/GameDemo/Intermediate/Build/Win64/x64/UnrealEditor/Development/GameDemo/GameDemo.cpp.obj"
+"C:/Users/kangzhonghua/Desktop/VS/Ugit/Demo/GameDemo/Intermediate/Build/Win64/x64/UnrealEditor/Development/GameDemo/PerModuleInline.gen.cpp.obj"
+/OUT:"C:/Users/kangzhonghua/Desktop/VS/Ugit/Demo/GameDemo/Intermediate/Build/Win64/x64/UnrealEditor/Development/GameDemo/UnrealEditor-GameDemo.lib"
