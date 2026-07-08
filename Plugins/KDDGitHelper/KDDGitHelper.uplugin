@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "KDDGitHelper",
+	"Description": "在 Content Browser 资产右键菜单中提供 Git 更新 / Git 还原（KDDGit 分组），验证不关闭编辑器即可更新资产的可行性。",
+	"Category": "Editor",
+	"CreatedBy": "KDD",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.8.0",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "KDDGitHelper",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}
