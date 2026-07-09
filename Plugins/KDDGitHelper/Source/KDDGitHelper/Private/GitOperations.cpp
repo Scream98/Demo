@@ -98,8 +98,17 @@ TArray<FString> FGitOperations::ResolveAssetFilePaths(const TArray<FAssetData>& 
 		{
 			continue;
 		}
-		const FString FilePath = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
-		Paths.Add(FilePath);
+		// 自动检测扩展名：先查 .umap（地图），不存在则用 .uasset（普通资产）
+		const FString MapFilePath = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetMapPackageExtension());
+		if (FPaths::FileExists(MapFilePath))
+		{
+			Paths.Add(MapFilePath);
+		}
+		else
+		{
+			const FString FilePath = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+			Paths.Add(FilePath);
+		}
 	}
 	return Paths;
 }

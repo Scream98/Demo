@@ -33,7 +33,7 @@ public:
 	// 从某文件向上查找包含 .git 的仓库根目录
 	static FString FindRepoRoot(const FString& InFromFile);
 
-	// 由选中的 FAssetData 列表解析出对应的 .uasset 物理文件路径
+	// 由选中的 FAssetData 列表解析出对应的物理文件路径（自动处理 .uasset / .umap）
 	static TArray<FString> ResolveAssetFilePaths(const TArray<FAssetData>& InAssets);
 
 	// 执行一条 git 命令

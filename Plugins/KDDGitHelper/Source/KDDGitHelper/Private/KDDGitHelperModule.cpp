@@ -23,6 +23,9 @@
 #include "Serialization/Archive.h"
 #include "UObject/PackageReload.h"
 #include "LevelEditor.h"
+#include "Engine/World.h"
+#include "FileHelpers.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKDDGitHelperUI, Log, All);
 
@@ -180,6 +183,34 @@ void FKDDGitHelperModule::ReloadRevertedAssets(const TArray<FAssetData>& Selecte
 		{
 			continue;
 		}
+
+		// 对地图/关卡：关闭再重新打开，确保编辑器完全刷新
+		if (Asset.GetClass() && Asset.GetClass()->IsChildOf(UWorld::StaticClass()))
+		{
+			UWorld* CurrentWorld = nullptr;
+			for (const FWorldContext& Context : GEditor->GetWorldContexts())
+			{
+				if (Context.WorldType == EWorldType::Editor)
+				{
+					CurrentWorld = Context.World();
+					break;
+				}
+			}
+
+			if (CurrentWorld && CurrentWorld->GetPackage()->GetName() == PackageName)
+			{
+				UE_LOG(LogKDDGitHelperUI, Log, TEXT("KDDGitHelper: Map %s is currently open, scheduling reload..."), *PackageName);
+				// 当前打开的就是这个地图 → 用 EditorLoadingAndSavingUtils 重新加载
+				// 延迟 0.5s 执行，等 git checkout 完全落盘
+				FTimerHandle Handle;
+				CurrentWorld->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([PackageName]()
+				{
+					UEditorLoadingAndSavingUtils::LoadMap(PackageName);
+				}), 0.5f, false);
+				continue;
+			}
+		}
+
 		UPackage* Package = FindPackage(nullptr, *PackageName);
 		if (Package)
 		{
