@@ -17,6 +17,10 @@
 *.so
 *.dylib
 *.dll
+!Source/ThirdParty/**/*.dll
+!Plugins/**/ThirdParty/**/*.dll
+!Source/ThirdParty/**/*.dylib
+!Plugins/**/ThirdParty/**/*.dylib
 
 # Fortran module files
 *.mod
