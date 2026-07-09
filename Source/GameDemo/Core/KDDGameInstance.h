@@ -11,7 +11,7 @@
  * 全程不依赖任何蓝图节点，纯 C++ → Lua 驱动。
  */
 UCLASS()
-class GAMEDEMO_API UKDDGameInstance : public UGameInstance
+class UKDDGameInstance : public UGameInstance
 {
     GENERATED_BODY()
 
@@ -20,9 +20,9 @@ public:
     virtual void Shutdown() override;
 
 private:
-    /** 延迟一帧后首次尝试执行 Lua Bootstrap */
-    void OnLuaBootstrap();
+    /** 延迟一帧后首次尝试执行 Lua GameStart */
+    void OnLuaStart();
 
-    /** 在 Lua VM 中执行 Bootstrap:Init()，若 PC 未就绪则重试 */
-    void TryBootstrap();
+    /** 在 Lua VM 中执行 GameStart()，若 PC 未就绪则重试 */
+    void TryStart();
 };

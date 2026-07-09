@@ -18,7 +18,7 @@
  * 自动完成绑定，无需在 Lua 或蓝图中手动调用绑定函数。
  */
 UCLASS()
-class GAMEDEMO_API UKDDModuleLocator : public ULuaModuleLocator
+class UKDDModuleLocator : public ULuaModuleLocator
 {
     GENERATED_BODY()
 

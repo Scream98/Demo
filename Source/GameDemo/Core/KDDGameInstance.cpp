@@ -8,25 +8,35 @@ void UKDDGameInstance::Init()
 {
     Super::Init();
 
-    UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Init, scheduling Lua bootstrap..."));
+    UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Init, scheduling Lua startup..."));
 
     // 延迟一帧，确保 World、PlayerController 等基础设施已就绪
-    GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::OnLuaBootstrap);
+    GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::OnLuaStart);
 }
 
 void UKDDGameInstance::Shutdown()
 {
+    // 通知 Lua 侧执行关闭（传入 nullptr，不指定特定 UObject）
+    auto* Env = IUnLuaModule::Get().GetEnv(nullptr);
+    if (Env)
+    {
+        Env->DoString(
+            TEXT("require('KDD.Game.GameApp'); GameShutdown()"),
+            TEXT("GameShutdown")
+        );
+    }
+
     UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Shutdown"));
     Super::Shutdown();
 }
 
-void UKDDGameInstance::OnLuaBootstrap()
+void UKDDGameInstance::OnLuaStart()
 {
-    UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Starting Lua bootstrap..."));
-    TryBootstrap();
+    UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Starting Lua..."));
+    TryStart();
 }
 
-void UKDDGameInstance::TryBootstrap()
+void UKDDGameInstance::TryStart()
 {
     if (!GetWorld())
     {
@@ -38,7 +48,7 @@ void UKDDGameInstance::TryBootstrap()
     if (!Env)
     {
         UE_LOG(LogTemp, Warning, TEXT("[KDDGameInstance] Lua env not ready, will retry..."));
-        GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::TryBootstrap);
+        GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::TryStart);
         return;
     }
 
@@ -53,29 +63,22 @@ void UKDDGameInstance::TryBootstrap()
         UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Pushed KDD_PC to Lua"));
     }
 
-    // ★ 第一步：加载绑定配置
-    //     模块级代码会自动遍历 KDDLuaBindingConfig 并调用
-    //     UKDDBindingManager::RegisterBinding() 注册到 C++ TMap。
+    // ★ 唯一的 Lua 入口：GameApp.lua 的 GameStart()
+    //     GameApp.lua 内部会 require KDDBindingManager（含配表注册），
+    //     然后创建并显示 MainView。Lua 侧依赖链完全由 Lua 自己管理。
     Env->DoString(
-        TEXT("require('KDD.KDDBindingManager')"),
-        TEXT("BindingInit")
-    );
-
-    // ★ 第二步：执行 Bootstrap（创建并显示 MainView）
-    //     Widget 创建时会触发 UnLua 自动绑定（无需手动 Bind）。
-    Env->DoString(
-        TEXT("require('KDD.Game.Bootstrap'):Init()"),
-        TEXT("BootstrapInit")
+        TEXT("require('KDD.Game.GameApp'); GameStart()"),
+        TEXT("GameStart")
     );
 
     // 如果 PlayerController 未就绪，延迟一帧重试
     if (!PC)
     {
         UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] PC not ready, scheduling retry..."));
-        GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::TryBootstrap);
+        GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::TryStart);
     }
     else
     {
-        UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Bootstrap completed."));
+        UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Start completed."));
     }
 }

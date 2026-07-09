@@ -1,5 +1,5 @@
 #include "KDDModuleLocator.h"
-#include "KDDBindingManager.h"
+#include "Unlua/KDDBindingManager.h"
 
 FString UKDDModuleLocator::Locate(const UObject* Object)
 {

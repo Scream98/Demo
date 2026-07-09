@@ -70,7 +70,10 @@ public class Lua : ModuleRules
         if (!dstFiles.All(File.Exists))
         {
             var buildDir = CMake();
-            CopyDirectory(Path.Combine(buildDir, m_Config), dirPath);
+            var configDir = Path.Combine(buildDir, m_Config);
+            // 多配置生成器（VS）：输出到 build/Release/；单配置（Ninja/NMake/MinGW）：直接输出到 build/
+            var srcDir = Directory.Exists(configDir) ? configDir : buildDir;
+            CopyDirectory(srcDir, dirPath);
         }
 
         PublicDefinitions.Add("LUA_BUILD_AS_DLL");

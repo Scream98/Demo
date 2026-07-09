@@ -1,0 +1,23 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/sumneko/setting/schema.json",
+    "runtime": {
+        "version": "Lua 5.3",
+        "path": [
+            "?.lua",
+            "?/init.lua",
+            "**/?.lua"
+        ]
+    },
+    "workspace": {
+        "ignoreDir": [],
+        "checkThirdParty": false
+    },
+    "diagnostics": {
+        "globals": [
+            "KDD_PC",
+            "UE",
+            "print",
+            "warn"
+        ]
+    }
+}

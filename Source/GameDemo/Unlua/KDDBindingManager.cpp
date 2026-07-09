@@ -6,13 +6,13 @@ void UKDDBindingManager::RegisterBinding(const FString& ClassName, const FString
 {
     if (ClassName.IsEmpty() || LuaPath.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("RegisterBinding: invalid params - ClassName=%s LuaPath=%s"),
+        UE_LOG(LogTemp, Warning, TEXT("[KDDBindingManager] RegisterBinding: invalid params - ClassName=%s LuaPath=%s"),
                *ClassName, *LuaPath);
         return;
     }
 
     BindingConfig.FindOrAdd(ClassName) = LuaPath;
-    UE_LOG(LogTemp, Log, TEXT("RegisterBinding: %s -> %s"), *ClassName, *LuaPath);
+    UE_LOG(LogTemp, Log, TEXT("[KDDBindingManager] RegisterBinding: %s -> %s"), *ClassName, *LuaPath);
 }
 
 FString UKDDBindingManager::GetLuaPath(const FString& ClassName)
