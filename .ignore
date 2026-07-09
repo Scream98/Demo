@@ -1,7 +1,9 @@
 /.git
 /.vs
 /.vscode
-/Content
+/Content/*
+!/Content/Script/
+!/Content/Script/**
 /DerivedDataCache
 /Intermediate
 /Saved
