@@ -144,16 +144,7 @@ void FUIPackerModule::ImportAssets()
 		SourceData = NewObject<UAutomatedAssetImportData>();
 		SourceData->DestinationPath = FullPath;
 		SourceData->bReplaceExisting = true;
-		// 指定 PaperSpriteSheet 导入工厂（UE5.8 ImportAssetsAutomated 不认 FactoryName 字符串，需传工厂对象指针）
-		UClass* SpriteFactoryClass = FindFirstObject<UClass>(TEXT("UPaperSpriteSheetReimportFactory"), EFindFirstObjectOptions::ExactClass);
-		if (!SpriteFactoryClass)
-		{
-			SpriteFactoryClass = FindFirstObject<UClass>(TEXT("UPaperSpriteSheetImportFactory"), EFindFirstObjectOptions::ExactClass);
-		}
-		if (SpriteFactoryClass)
-		{
-			SourceData->Factory = NewObject<UFactory>(GetTransientPackage(), SpriteFactoryClass);
-		}
+		// 不指定工厂，让 UE 按 .paper2dsprites 扩展名自动匹配 PaperSpriteSheetImportFactory
 		SourceData->Filenames.Empty();
 		for (const FString& Path : FileNames)
 		{
