@@ -1,0 +1,13 @@
+{
+  "GroupName":"Texture",
+  "Filenames":[
+     "{__fileContent__}"
+  ],
+  "DestinationPath":"{__fileDest__}",
+  "FactoryName":"ReimportTextureFactory",
+  "bReplaceExisting":"true",
+  "bSkipReadOnly":"false",
+  "ImportSettings":{
+      
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "GroupName":"SpriteSheet",
+  "Filenames":[
+     "{__fileContent__}"
+  ],
+  "DestinationPath":"{__fileDest__}",
+  "FactoryName":"PaperSpriteSheetReimportFactory",
+  "bReplaceExisting":"true",
+  "bSkipReadOnly":"false",
+  "ImportSettings":{
+      
+  }
+}

@@ -11,13 +11,13 @@ local KDDLuaBindingConfig = {
     -- ResPath 只填基础资产路径（去掉 .uasset 后缀），
     -- _C 后缀由 KDDBindingManager.lua 自动补全。
     MainView = {
-        ResPath = "/Game/UI/Main/MainView",
+        ResPath = "/Game/UI/BP/Main/MainView",
         LuaPath = "KDD.Biz.Main.MainView"
     },
 
     -- ======== MVC 示例（1 前缀确保排序靠前作示例） ========
     ["1Example"] = {
-        ResPath = "/Game/UI/Example/WBP_1Example",
+        ResPath = "/Game/UI/Example/1Example",
         LuaPath = "KDD.Biz.1Example.1ExampleView"
     },
 }
