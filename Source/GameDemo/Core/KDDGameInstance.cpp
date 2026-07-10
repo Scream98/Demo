@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Misc/PackageName.h"
+#include "Containers/Ticker.h"
 
 void UKDDGameInstance::Init()
 {
@@ -11,8 +12,25 @@ void UKDDGameInstance::Init()
 
     UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Init, scheduling Lua startup..."));
 
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[KDDGameInstance] GetWorld() returned null during Init! Trying FTSTicker fallback..."));
+        // Init 时 World 可能未就绪（特别是在编辑器 PIE 环境下），
+        // 用 FTSTicker 做兜底，0.1s 后重试
+        FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateLambda([this](float) -> bool
+            {
+                OnLuaStart();
+                return false; // 只执行一次
+            }),
+            0.1f
+        );
+        return;
+    }
+
     // 延迟一帧，确保 World、PlayerController 等基础设施已就绪
-    GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::OnLuaStart);
+    World->GetTimerManager().SetTimerForNextTick(this, &UKDDGameInstance::OnLuaStart);
 }
 
 void UKDDGameInstance::Shutdown()
@@ -65,9 +83,10 @@ void UKDDGameInstance::TryStart()
     }
 
     // 检查当前地图是否是 MainMap，只有 MainMap 才弹出 MainView
+    // ★ PIE 环境下 UE5 会给包名加 UEDPIE_0_ 前缀，所以不能精确等于，必须用后缀匹配
     FString MapPath = GetWorld()->GetOutermost()->GetName();
     FString MapName = FPackageName::GetShortName(MapPath);
-    const bool bIsMainMap = MapName.Equals(TEXT("MainMap"), ESearchCase::IgnoreCase);
+    const bool bIsMainMap = MapName.EndsWith(TEXT("MainMap"), ESearchCase::IgnoreCase);
     UE_LOG(LogTemp, Log, TEXT("[KDDGameInstance] Current map: %s (isMainMap=%d)"), *MapName, bIsMainMap);
 
     if (bIsMainMap)
