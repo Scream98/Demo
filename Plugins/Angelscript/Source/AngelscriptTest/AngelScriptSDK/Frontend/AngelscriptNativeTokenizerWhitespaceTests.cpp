@@ -1,0 +1,165 @@
+#include "../Support/AngelscriptNativeCoreTestSupport.h"
+#include "../Support/AngelscriptNativeCaseTestSupport.h"
+
+// Tokenizer whitespace and comment behavior coverage.
+#include "CQTest.h"
+
+#include "StartAngelscriptHeaders.h"
+#include "source/as_tokendef.h"
+#include "source/as_tokenizer.h"
+#include "EndAngelscriptHeaders.h"
+
+#if WITH_ANGELSCRIPT_UNITTESTS
+
+
+TEST_CLASS_WITH_FLAGS(FTokenizerWhitespaceTests,
+	"Angelscript.TestModule.AngelScriptSDK.Frontend.Tokenizer.Whitespace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+{
+	TEST_METHOD(LineCommentEmpty)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained empty-line-comment smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns comment form, payload, newline, and termination combinations.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttOnelineComment), static_cast<int32>(Tokenizer.GetToken("//\n", 3, &TokenLength)),
+			TEXT("Empty line comment should be recognized")));
+		ASSERT_THAT(AreEqual(3, static_cast<int32>(TokenLength),
+			TEXT("Empty line comment should consume through the newline")));
+	}
+
+	TEST_METHOD(BlockCommentNested_DocumentBehavior)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained first-close block-comment behavior; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns block-comment payload and termination combinations.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		const char* Input = "/* outer /* inner */ tail */";
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttMultilineComment), static_cast<int32>(Tokenizer.GetToken(Input, std::strlen(Input), &TokenLength)),
+			TEXT("Block comments should be recognized")));
+		ASSERT_THAT(IsTrue(TokenLength < std::strlen(Input),
+			TEXT("Tokenizer should stop at the first closing block-comment marker")));
+	}
+
+	TEST_METHOD(UnterminatedBlockCommentReachesEOF)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained unterminated-comment smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns terminated and EOF comment boundaries.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		const char* Input = "/* comment";
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttMultilineComment), static_cast<int32>(Tokenizer.GetToken(Input, std::strlen(Input), &TokenLength)),
+			TEXT("Unterminated block comment should still be classified as a multiline comment")));
+		ASSERT_THAT(AreEqual(static_cast<int32>(std::strlen(Input)), static_cast<int32>(TokenLength),
+			TEXT("Unterminated block comment should consume to end of input")));
+	}
+
+	TEST_METHOD(MixedCRLFWhitespace)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained mixed-whitespace smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns whitespace forms and LF/CRLF boundaries.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		const char* Input = " \t\r\n  ";
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttWhiteSpace), static_cast<int32>(Tokenizer.GetToken(Input, std::strlen(Input), &TokenLength)),
+			TEXT("Mixed whitespace should be grouped into one whitespace token")));
+		ASSERT_THAT(AreEqual(static_cast<int32>(std::strlen(Input)), static_cast<int32>(TokenLength),
+			TEXT("Mixed whitespace should consume the full whitespace span")));
+	}
+
+	TEST_METHOD(BomAtStartOfSource)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained BOM smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns BOM placement and following-token boundaries.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		const char Input[] = "\xEF\xBB\xBF" "class";
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttWhiteSpace), static_cast<int32>(Tokenizer.GetToken(Input, sizeof(Input) - 1, &TokenLength)),
+			TEXT("UTF-8 BOM should be recognized as whitespace")));
+		ASSERT_THAT(AreEqual(3, static_cast<int32>(TokenLength),
+			TEXT("UTF-8 BOM token should consume exactly three bytes")));
+	}
+
+	TEST_METHOD(IdentifierLeadingUnderscore)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained identifier spelling smoke; FRONTEND-TOKEN-TAXONOMY-ACTIVE-KEYWORDS owns keyword versus identifier spelling boundaries.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttIdentifier), static_cast<int32>(Tokenizer.GetToken("_Value", 6, &TokenLength)),
+			TEXT("Identifier may start with underscore")));
+		ASSERT_THAT(AreEqual(6, static_cast<int32>(TokenLength),
+			TEXT("Identifier starting with underscore should consume all identifier characters")));
+	}
+
+	TEST_METHOD(IdentifierWithDigits)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained identifier suffix smoke; FRONTEND-TOKEN-TAXONOMY-ACTIVE-KEYWORDS owns keyword and identifier trailing-boundary behavior.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttIdentifier), static_cast<int32>(Tokenizer.GetToken("Value123", 8, &TokenLength)),
+			TEXT("Identifier may contain trailing digits")));
+		ASSERT_THAT(AreEqual(8, static_cast<int32>(TokenLength),
+			TEXT("Identifier with digits should consume the full identifier")));
+	}
+
+	TEST_METHOD(KeywordVsIdentifierBoundary)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained keyword-prefix identifier smoke; FRONTEND-TOKEN-TAXONOMY-ACTIVE-KEYWORDS owns every active keyword and identifier boundary.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+
+		ASSERT_THAT(AreEqual(static_cast<int32>(ttIdentifier), static_cast<int32>(Tokenizer.GetToken("className", 9, &TokenLength)),
+			TEXT("Keyword followed by an identifier character should remain an identifier")));
+		ASSERT_THAT(AreEqual(9, static_cast<int32>(TokenLength),
+			TEXT("Keyword-boundary identifier should consume all characters")));
+	}
+
+	TEST_METHOD(ZeroLengthInputReturnsEnd)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained zero-length sentinel smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns EOF state and bounded token behavior.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+		const eTokenType TokenType = Tokenizer.GetToken("", 0, &TokenLength);
+
+		ASSERT_THAT(IsTrue(TokenType == ttEnd || TokenType == ttUnrecognizedToken,
+			TEXT("Raw zero-length tokenizer input should return a stable sentinel token")));
+	}
+
+	TEST_METHOD(PastEofGracefulHandling)
+	{
+		AS_NATIVE_NON_PRODUCT("LegacyCompatibility",
+			"Retained past-EOF sentinel smoke; FRONTEND-TOKEN-COMMENT-WHITESPACE-EOF owns EOF state and bounded token behavior.");
+
+		AngelscriptNativeTestSupport::FTokenizerAccessor Tokenizer;
+		size_t TokenLength = 0;
+		const char Input[] = "";
+		const eTokenType TokenType = Tokenizer.GetToken(Input, 0, &TokenLength);
+
+		ASSERT_THAT(IsTrue(TokenType == ttEnd || TokenType == ttUnrecognizedToken,
+			TEXT("Past-EOF style input should not produce an ordinary source token")));
+		ASSERT_THAT(IsTrue(TokenLength <= 1,
+			TEXT("Past-EOF style input should report a bounded token length")));
+	}
+};
+
+#endif

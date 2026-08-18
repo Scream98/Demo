@@ -1,0 +1,446 @@
+// ============================================================================
+// AngelscriptReflectiveFallbackCacheTests.cpp
+//
+// Functional regression coverage for the per-UFunction parameter cache that
+// backs the BlueprintCallable reflective-fallback path. The cache lives inside
+// FBlueprintCallableReflectiveSignature::CachedParams and is populated lazily
+// on the first reflective call, then reused for every subsequent dispatch via
+// `Function->Invoke` (no ProcessEvent).
+//
+// Automation IDs:
+//   Angelscript.TestModule.Bindings.ReflectiveFallbackCache.*
+//
+// Sections cover the dispatch matrix called out in
+// `Documents/Plans/Plan_ReflectiveFallbackCache.md`:
+//   PODScalar    - int32/bool/double fast-path memcpy + POD return
+//   NonPOD       - FString copy semantics
+//   OutParam     - pure out-param writeback through the FOutParmRec chain
+//   Return       - non-POD FString return
+//   MixinObject  - static UFUNCTION binding with bInjectMixinObject==true
+//                  (every BPLib free function exercises this path)
+//   CacheReuse   - same UFunction called many times in one AS run; second and
+//                  later calls must reuse the cached metadata and remain
+//                  correct (verified by counting outputs across iterations).
+//   Eligibility  - direct C++ check that the representative BPLib UFUNCTION
+//                  is still accepted by the reflective fallback gate.
+//
+// Why we use BlueprintPathsLibrary for these tests:
+//   The UHT summary (`AS_FunctionTable_Summary.json`) reports
+//   BlueprintPathsLibrary entries as stubs (100% reflective fallback). That
+//   makes path functions a stable core-plugin signal that the cache is on the
+//   critical path without depending on optional plugin bindings.
+// ============================================================================
+
+#include "CQTest.h"
+#include "AngelscriptTestMacros.h"
+#include "AngelscriptTestUtilities.h"
+#include "AngelscriptTestEngineHelper.h"
+#include "AngelscriptTestModuleScope.h"
+#include "AngelscriptTestExecute.h"
+#include "AngelscriptReflectiveAccess.h"
+#include "Binds/BlueprintCallableReflectiveFallback.h"
+#include "Binds/Helper_FunctionSignature.h"
+
+#include "Kismet/BlueprintPathsLibrary.h"
+#include "HAL/IConsoleManager.h"
+
+#if WITH_ANGELSCRIPT_UNITTESTS
+
+
+TEST_CLASS_WITH_FLAGS(FAngelscriptReflectiveFallbackCacheTest,
+	"Angelscript.TestModule.Bindings.ReflectiveFallbackCache",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+{
+private:
+	// Build the AS namespace prefix used for static UFUNCTIONs that reach the
+	// reflective fallback.
+	static FString BuildPathsLibraryCallPrefix(FAutomationTestBase& Test)
+	{
+		UClass* LibraryClass = UBlueprintPathsLibrary::StaticClass();
+		UFunction* RepresentativeFunction = LibraryClass->FindFunctionByName(TEXT("GetBaseFilename"));
+		TSharedPtr<FAngelscriptType> LibraryType = FAngelscriptType::GetByClass(LibraryClass);
+		FNoDiscardAsserter LocalAssert(Test);
+		if (!LocalAssert.IsTrue(LibraryType.IsValid(), TEXT("BlueprintPathsLibrary type should resolve")))
+		{
+			return FString();
+		}
+
+		if (!LocalAssert.IsNotNull(RepresentativeFunction, TEXT("GetBaseFilename should exist on BlueprintPathsLibrary")))
+		{
+			return FString();
+		}
+
+		const FString Namespace = FAngelscriptFunctionSignature::GetScriptNamespaceForClass(LibraryType.ToSharedRef(), RepresentativeFunction);
+		return Namespace.IsEmpty() ? FString() : Namespace + TEXT("::");
+	}
+
+public:
+	BEFORE_ALL()
+	{
+		ASTEST_CREATE_ENGINE();
+	}
+
+	AFTER_ALL()
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		ASTEST_RESET_ENGINE(Engine);
+	}
+
+	// ====================================================================
+	// Section: PODScalar  - memcpy fast path for POD scalar args/return.
+	// ====================================================================
+
+	TEST_METHOD(PODScalar)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunPODScalar()
+			{
+				return $CALL_PREFIX$IsRelative("Relative/Cache.txt") ? 1 : 0;
+			}
+			)AS");
+		FString PODScalarSource = ScriptTemplate;
+		PODScalarSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCachePODScalar", PODScalarSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunPODScalar()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("POD scalar reflective fallback should return bool via memcpy fast path")));
+	}
+
+	// ====================================================================
+	// Section: NonPOD  - exercises virtual CopySingleValue path for FName/FString.
+	// ====================================================================
+
+	TEST_METHOD(NonPOD)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunNonPOD()
+			{
+				FString Clean = $CALL_PREFIX$GetCleanFilename("C:/Reflective/Fallback/Cache.txt");
+				if (Clean != "Cache.txt")
+				{
+					return 10;
+				}
+				return 1;
+			}
+			)AS");
+		FString NonPODSource = ScriptTemplate;
+		NonPODSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCacheNonPOD", NonPODSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunNonPOD()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("Non-POD reflective fallback should round-trip FString via CopySingleValue")));
+	}
+
+	// ====================================================================
+	// Section: OutParam  - exercises FOutParmRec chain for `out` writeback.
+	//
+	// `Split(const FString&, FString&, FString&, FString&)` is a
+	// reflective-fallback function with pure out FString refs - the cached
+	// invoker must write the path parts back to AS storage.
+	// ====================================================================
+
+	TEST_METHOD(OutParam)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunOutParam()
+			{
+				FString Path;
+				FString Filename;
+				FString Extension;
+				$CALL_PREFIX$Split("C:/Reflective/Fallback/Cache.txt", Path, Filename, Extension);
+				if (Path != "C:/Reflective/Fallback")
+				{
+					return 10;
+				}
+				if (Filename != "Cache")
+				{
+					return 20;
+				}
+				if (Extension != "txt")
+				{
+					return 30;
+				}
+				return 1;
+			}
+			)AS");
+		FString OutParamSource = ScriptTemplate;
+		OutParamSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCacheOutParam", OutParamSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunOutParam()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("Reflective fallback should write UPARAM(ref) parameters back to script storage")));
+	}
+
+	// ====================================================================
+	// Section: Return  - non-POD FString return.
+	// ====================================================================
+
+	TEST_METHOD(Return)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunReturn()
+			{
+				FString Base = $CALL_PREFIX$GetBaseFilename("C:/Reflective/Fallback/Cache.txt", true);
+				if (Base != "Cache")
+				{
+					return 10;
+				}
+				return 1;
+			}
+			)AS");
+		FString ReturnValueSource = ScriptTemplate;
+		ReturnValueSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCacheReturn", ReturnValueSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunReturn()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("Reflective fallback should return non-POD FString values correctly")));
+	}
+
+	// ====================================================================
+	// Section: MixinObject  - static UFUNCTION bound with bInjectMixinObject=true.
+	//
+	// All BlueprintPathsLibrary functions are static BPLib statics that
+	// reach the reflective fallback path with bInjectMixinObject==true. This
+	// section just confirms the mixin-object branch of the cached invoker
+	// (where the first parameter slot is fed from Generic->GetObject()) keeps
+	// returning sane values across multiple BPLib calls in one script.
+	// ====================================================================
+
+	TEST_METHOD(MixinObject)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunMixin()
+			{
+				FString Clean = $CALL_PREFIX$GetCleanFilename("C:/Reflective/Fallback/Cache.txt");
+				bool bRelative = $CALL_PREFIX$IsRelative("Relative/Cache.txt");
+				if (Clean != "Cache.txt")
+				{
+					return 10;
+				}
+				if (!bRelative)
+				{
+					return 20;
+				}
+				return 1;
+			}
+			)AS");
+		FString MixinObjectSource = ScriptTemplate;
+		MixinObjectSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCacheMixin", MixinObjectSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunMixin()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("Mixin-object reflective fallback should still produce correct results across multiple calls")));
+	}
+
+	// ====================================================================
+	// Section: CacheReuse  - hammer the same UFunction many times.
+	//
+	// On the first call the cache is built; every later call must reuse it.
+	// We do not (and cannot) reach into FBlueprintCallableReflectiveSignature::
+	// CachedParams from this test (it lives in an anonymous namespace inside
+	// BlueprintCallableReflectiveFallback.cpp), so we infer cache health by
+	// running the same function many times and demanding consistent output.
+	// ====================================================================
+
+	TEST_METHOD(CacheReuse)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunCacheReuse()
+			{
+				int TotalCount = 0;
+				for (int Index = 0; Index < 32; ++Index)
+				{
+					FString Clean = $CALL_PREFIX$GetCleanFilename("C:/Reflective/Fallback/Cache.txt");
+					TotalCount += Clean.Len();
+				}
+				if (TotalCount != 288)
+				{
+					return 10;
+				}
+				return 1;
+			}
+			)AS");
+		FString CacheReuseSource = ScriptTemplate;
+		CacheReuseSource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		asIScriptModule* Module = BuildModule(*TestRunner, Engine, "ASRefCacheReuse", CacheReuseSource);
+		if (Module == nullptr) return;
+
+		asIScriptFunction* Function = GetFunctionByDecl(*TestRunner, *Module, TEXT("int RunCacheReuse()"));
+		if (Function == nullptr) return;
+
+		int32 Result = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *Function, Result)) return;
+
+		ASSERT_THAT(AreEqual(1, Result, TEXT("Reflective fallback cache should produce correct results across 32 repeated calls")));
+	}
+
+	// ====================================================================
+	// Section: FallbackEligibility
+	//
+	// Structural verification: the representative BPLib UFUNCTION remains
+	// classifiable by the reflective fallback gate.
+	// ====================================================================
+
+	TEST_METHOD(FuncNetEligibility)
+	{
+		const UFunction* BaseFilenameFunction = UBlueprintPathsLibrary::StaticClass()
+			->FindFunctionByName(TEXT("GetBaseFilename"));
+		ASSERT_THAT(IsNotNull(BaseFilenameFunction));
+		ASSERT_THAT(AreEqual(
+			EReflectionFallbackResult::Success,
+			EvaluateReflectionFallback(BaseFilenameFunction),
+			TEXT("BPLib UFUNCTIONs reaching reflective fallback should remain eligible after the cache lands")));
+	}
+
+	// ====================================================================
+	// Section: CVarParityCachedVsProcessEvent
+	//
+	// Toggles `as.ReflectiveFallback.UseCache` mid-test to verify both
+	// dispatch strategies produce identical observable results. Combines
+	// POD scalar + non-POD return + out-param writeback + repeated calls
+	// into one composite checksum so a single integer encodes the full
+	// behavioural surface. The CVar is captured + restored to keep the
+	// rest of the suite running with whatever default the project chose.
+	// ====================================================================
+
+	TEST_METHOD(CVarParityCachedVsProcessEvent)
+	{
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE_FULL();
+		FAngelscriptEngineScope Scope(Engine);
+
+		const FString CallPrefix = BuildPathsLibraryCallPrefix(*TestRunner);
+		if (CallPrefix.IsEmpty()) return;
+
+		// Composite checksum exercising cached and legacy dispatch with
+		// repeated POD scalar and FString-return calls. Out-param writeback is
+		// covered by the dedicated OutParam section above.
+		const FString ScriptTemplate = ASTEST_AS(R"AS(
+			int RunParity()
+			{
+				int Acc = 0;
+				for (int Index = 0; Index < 8; ++Index)
+				{
+					bool bRelative = $CALL_PREFIX$IsRelative("Relative/Cache.txt");
+					Acc += bRelative ? 100 : 0;
+
+					FString Clean = $CALL_PREFIX$GetCleanFilename("C:/Reflective/Fallback/Cache.txt");
+					Acc += Clean.Len();
+
+					FString Base = $CALL_PREFIX$GetBaseFilename("C:/Reflective/Fallback/Cache.txt", true);
+					Acc += Base.Len() * 7;
+				}
+				return Acc;
+			}
+			)AS");
+		FString CVarParitySource = ScriptTemplate;
+		CVarParitySource.ReplaceInline(TEXT("$CALL_PREFIX$"), *CallPrefix, ESearchCase::CaseSensitive);
+
+		// Capture the CVar so we leave it exactly as we found it. The CVar is
+		// owned by AngelscriptRuntime (registered in BlueprintCallableReflectiveFallback.cpp).
+		IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("as.ReflectiveFallback.UseCache"));
+		ASSERT_THAT(IsNotNull(CVar));
+		const bool bOriginal = CVar->GetBool();
+		ON_SCOPE_EXIT { CVar->Set(bOriginal ? 1 : 0, ECVF_SetByCode); };
+
+		// --- Cached path (CVar = 1) ---
+		CVar->Set(1, ECVF_SetByCode);
+		asIScriptModule* CachedModule = BuildModule(*TestRunner, Engine, "ASRefCacheParityCached", CVarParitySource);
+		if (CachedModule == nullptr) return;
+		asIScriptFunction* CachedFunction = GetFunctionByDecl(*TestRunner, *CachedModule, TEXT("int RunParity()"));
+		if (CachedFunction == nullptr) return;
+		int32 CachedResult = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *CachedFunction, CachedResult)) return;
+
+		// --- Legacy ProcessEvent path (CVar = 0) ---
+		CVar->Set(0, ECVF_SetByCode);
+		asIScriptModule* LegacyModule = BuildModule(*TestRunner, Engine, "ASRefCacheParityLegacy", CVarParitySource);
+		if (LegacyModule == nullptr) return;
+		asIScriptFunction* LegacyFunction = GetFunctionByDecl(*TestRunner, *LegacyModule, TEXT("int RunParity()"));
+		if (LegacyFunction == nullptr) return;
+		int32 LegacyResult = 0;
+		if (!ExecuteIntFunction(*TestRunner, Engine, *LegacyFunction, LegacyResult)) return;
+
+		ASSERT_THAT(AreEqual(
+			LegacyResult,
+			CachedResult,
+			TEXT("Cached and ProcessEvent reflective fallback paths must produce identical composite checksum")));
+
+		// Sanity bound: a zero would indicate both paths silently failed in
+		// lockstep, defeating the equality check above.
+		ASSERT_THAT(IsTrue(CachedResult > 0, TEXT("Composite checksum should be non-zero")));
+	}
+};
+
+#endif

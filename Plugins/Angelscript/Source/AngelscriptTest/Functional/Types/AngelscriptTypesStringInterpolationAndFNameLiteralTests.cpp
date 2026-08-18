@@ -1,0 +1,91 @@
+#include "AngelscriptFunctionalTestUtils.h"
+#include "AngelscriptTestMacros.h"
+
+#include "Components/ActorTestSpawner.h"
+#include "GameFramework/Actor.h"
+#include "CQTest.h"
+#include "Misc/ScopeExit.h"
+#include "UObject/UnrealType.h"
+
+// Test Layer: UE Functional - Round1 deep-fill (f-string interpolation + n-name literal runtime equality)
+#if WITH_ANGELSCRIPT_UNITTESTS
+
+
+TEST_CLASS_WITH_FLAGS(FAngelscriptTypesStringInterpolationAndFNameLiteralTests,
+	"Angelscript.TestModule.Functional.Types.StringInterpolationAndFNameLiteral",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+{
+	TEST_METHOD(FStringInterpolationAndFNameLiteralRuntimeValues)
+	{
+		using namespace AngelscriptFunctionalTestUtils;
+		FAngelscriptEngine& Engine = ASTEST_CREATE_ENGINE();
+		FAngelscriptEngineScope EngineScope(Engine);
+
+		static const FName ModuleName(TEXT("FunctionalStringInterpolationAndFNameLiteral"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(
+			*TestRunner,
+			Engine,
+			ModuleName,
+			TEXT("FunctionalStringInterpolationAndFNameLiteral.as"),
+			TEXT(R"AS(
+UCLASS()
+class AFunctionalStringInterpolationActor : AActor
+{
+	UPROPERTY()
+	FString Greeting;
+
+	UPROPERTY()
+	FString Composite;
+
+	UPROPERTY()
+	bool bFNameLiteralEqualsConstructor = false;
+
+	UPROPERTY()
+	bool bFNameLiteralIsCaseInsensitive = false;
+
+	UFUNCTION(BlueprintOverride)
+	void BeginPlay()
+	{
+		FString WhoName = "World";
+		Greeting = f"Hello {WhoName}!";
+
+		int32 A = 1;
+		int32 B = 2;
+		int32 C = 3;
+		Composite = f"{A} {B} in {C}s";
+
+		bFNameLiteralEqualsConstructor = (n"Tag" == FName("Tag"));
+		bFNameLiteralIsCaseInsensitive = (n"tag" == FName("TAG"));
+	}
+}
+)AS"),
+			TEXT("AFunctionalStringInterpolationActor"));
+		if (ActorClass == nullptr) { return; }
+
+		FActorTestSpawner Spawner;
+		Spawner.InitializeGameSubsystems();
+		AActor* Actor = SpawnScriptActor(*TestRunner, Spawner, ActorClass);
+		if (Actor == nullptr) { return; }
+		BeginPlayActor(Engine, *Actor);
+
+		FString Greeting;
+		ReadPropertyValue<FStrProperty>(*TestRunner, Actor, TEXT("Greeting"), Greeting);
+		ASSERT_THAT(AreEqual(FString(TEXT("Hello World!")), Greeting, TEXT("Greeting should be the interpolated literal 'Hello World!'")));
+
+		FString Composite;
+		ReadPropertyValue<FStrProperty>(*TestRunner, Actor, TEXT("Composite"), Composite);
+		ASSERT_THAT(AreEqual(FString(TEXT("1 2 in 3s")), Composite, TEXT("Composite should be '1 2 in 3s'")));
+
+		bool bLiteralEquality = false;
+		ReadPropertyValue<FBoolProperty>(*TestRunner, Actor, TEXT("bFNameLiteralEqualsConstructor"), bLiteralEquality);
+		ASSERT_THAT(IsTrue(bLiteralEquality, TEXT("n\"Tag\" should equal FName(\"Tag\")")));
+
+		bool bCaseInsensitive = false;
+		ReadPropertyValue<FBoolProperty>(*TestRunner, Actor, TEXT("bFNameLiteralIsCaseInsensitive"), bCaseInsensitive);
+		ASSERT_THAT(IsTrue(bCaseInsensitive, TEXT("n\"tag\" should equal FName(\"TAG\") (case-insensitive)")));
+	}
+};
+
+#endif // WITH_ANGELSCRIPT_UNITTESTS

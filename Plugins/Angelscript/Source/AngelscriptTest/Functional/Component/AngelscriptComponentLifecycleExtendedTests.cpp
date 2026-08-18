@@ -1,0 +1,570 @@
+#include "CQTest.h"
+#include "AngelscriptFunctionalTestUtils.h"
+#include "AngelscriptReflectiveAccess.h"
+#include "AngelscriptTestMacros.h"
+#include "AngelscriptTestWorld.h"
+
+#include "Components/ActorComponent.h"
+#include "Components/BillboardComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "Misc/ScopeExit.h"
+
+#if WITH_ANGELSCRIPT_UNITTESTS
+
+using namespace AngelscriptFunctionalTestUtils;
+
+TEST_CLASS_WITH_FLAGS(FAngelscriptComponentLifecycleExtendedTest,
+	"Angelscript.TestModule.Component.LifecycleExtended",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+{
+	template <typename ActualType, typename ExpectedType>
+	static bool CheckEqual(FAutomationTestBase& Test, const TCHAR* Message, const ActualType& Actual, const ExpectedType& Expected)
+	{
+		FNoDiscardAsserter LocalAssert(Test);
+		return LocalAssert.AreEqual(Expected, Actual, Message);
+	}
+
+	template <typename ValueType>
+	static bool CheckNotNull(FAutomationTestBase& Test, const TCHAR* Message, const ValueType& Value)
+	{
+		FNoDiscardAsserter LocalAssert(Test);
+		return LocalAssert.IsNotNull(Value, Message);
+	}
+
+	template <typename ComponentType = UActorComponent>
+	static ComponentType* ReadComponentProperty(FAutomationTestBase& Test, UObject* Object, const TCHAR* PropertyName)
+	{
+		UObject* ComponentObject = nullptr;
+		if (!GetObjectByPath(Test, Object, PropertyName, ComponentObject))
+		{
+			return nullptr;
+		}
+
+		ComponentType* Component = Cast<ComponentType>(ComponentObject);
+		(void)CheckNotNull(
+			Test,
+			*FString::Printf(TEXT("Property '%s' should point to the expected component type"), PropertyName),
+			Component);
+		return Component;
+	}
+
+	BEFORE_ALL()
+	{
+		ASTEST_CREATE_ENGINE();
+	}
+
+	AFTER_ALL()
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		ASTEST_RESET_ENGINE(Engine);
+	}
+
+	TEST_METHOD(HasBegunPlayTransitionsInWorld)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestComponentLifecycleHasBegunPlay"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestComponentLifecycleHasBegunPlay.as"),
+			TEXT(R"AS(
+UCLASS()
+class UTestComponentLifecycleBeginPlayProbe : UActorComponent
+{
+	UPROPERTY()
+	bool bSawBeginPlay = false;
+
+	UPROPERTY()
+	bool bHadNotBegunPlayInsideOverride = false;
+
+	UPROPERTY()
+	AActor OwnerAtBeginPlay;
+
+	UFUNCTION(BlueprintOverride)
+	void BeginPlay()
+	{
+		bSawBeginPlay = true;
+		bHadNotBegunPlayInsideOverride = !HasBegunPlay();
+		OwnerAtBeginPlay = GetOwner();
+	}
+}
+
+UCLASS()
+class ATestComponentLifecycleHasBegunPlay : AActor
+{
+	UPROPERTY(DefaultComponent)
+	UTestComponentLifecycleBeginPlayProbe Probe;
+}
+)AS"),
+			TEXT("ATestComponentLifecycleHasBegunPlay"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		UActorComponent* Probe = ReadComponentProperty(*TestRunner, Actor, TEXT("Probe"));
+		if (Probe == nullptr) return;
+
+		ASSERT_THAT(IsFalse(Probe->HasBegunPlay(), TEXT("Script component should not report begun play before actor BeginPlay")));
+		W.BeginPlay(*Actor);
+		ASSERT_THAT(IsTrue(Probe->HasBegunPlay(), TEXT("Script component should report begun play after actor BeginPlay")));
+
+		bool bSawBeginPlay = false;
+		bool bHadNotBegunPlayInsideOverride = false;
+		if (!ReadPropertyValue<FBoolProperty>(*TestRunner, Probe, TEXT("bSawBeginPlay"), bSawBeginPlay)
+			|| !ReadPropertyValue<FBoolProperty>(*TestRunner, Probe, TEXT("bHadNotBegunPlayInsideOverride"), bHadNotBegunPlayInsideOverride))
+		{
+			return;
+		}
+
+		UObject* OwnerAtBeginPlay = nullptr;
+		if (!GetObjectByPath(*TestRunner, Probe, TEXT("OwnerAtBeginPlay"), OwnerAtBeginPlay)) return;
+
+		ASSERT_THAT(IsTrue(bSawBeginPlay, TEXT("BeginPlay override should run on the script component")));
+		ASSERT_THAT(IsTrue(bHadNotBegunPlayInsideOverride, TEXT("HasBegunPlay binding should still be false inside the component BeginPlay override")));
+		ASSERT_THAT(AreEqual(static_cast<UObject*>(Actor), OwnerAtBeginPlay, TEXT("Component BeginPlay should observe its owning actor")));
+	}
+
+	TEST_METHOD(ComponentTickDispatchIsExact)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestComponentLifecycleExactTick"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestComponentLifecycleExactTick.as"),
+			TEXT(R"AS(
+UCLASS()
+class UTestComponentLifecycleExactTickProbe : UActorComponent
+{
+	UPROPERTY()
+	int TickCount = 0;
+
+	UFUNCTION(BlueprintOverride)
+	void Tick(float DeltaSeconds)
+	{
+		TickCount += 1;
+	}
+}
+
+UCLASS()
+class ATestComponentLifecycleExactTick : AActor
+{
+	UPROPERTY(DefaultComponent)
+	UTestComponentLifecycleExactTickProbe Probe;
+}
+)AS"),
+			TEXT("ATestComponentLifecycleExactTick"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		UActorComponent* Probe = ReadComponentProperty(*TestRunner, Actor, TEXT("Probe"));
+		if (Probe == nullptr) return;
+
+		Probe->PrimaryComponentTick.bCanEverTick = true;
+		Probe->SetComponentTickEnabled(true);
+		W.BeginPlay(*Actor);
+
+		constexpr int32 ExpectedTicks = 4;
+		W.DispatchComponentTick(*Probe, 0.016f, ExpectedTicks);
+
+		int32 TickCount = 0;
+		if (!ReadPropertyValue<FIntProperty>(*TestRunner, Probe, TEXT("TickCount"), TickCount)) return;
+
+		ASSERT_THAT(AreEqual(ExpectedTicks, TickCount, TEXT("Direct component tick dispatch should call the script component exactly N times")));
+	}
+
+	TEST_METHOD(DestroyComponentUnregistersRuntimeComponent)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestComponentLifecycleDestroy"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestComponentLifecycleDestroy.as"),
+			TEXT(R"AS(
+UCLASS()
+class UTestComponentLifecycleDestroyProbe : UActorComponent
+{
+	UFUNCTION()
+	int DestroySelf()
+	{
+		DestroyComponent();
+		return 1;
+	}
+}
+
+UCLASS()
+class ATestComponentLifecycleDestroy : AActor
+{
+	UPROPERTY(DefaultComponent)
+	UTestComponentLifecycleDestroyProbe Probe;
+}
+)AS"),
+			TEXT("ATestComponentLifecycleDestroy"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		UActorComponent* Probe = ReadComponentProperty(*TestRunner, Actor, TEXT("Probe"));
+		if (Probe == nullptr) return;
+		if (!FNoDiscardAsserter(*TestRunner).IsTrue(Probe->IsRegistered(), TEXT("Default script component should start registered"))) return;
+
+		FFunctionInvoker Invoker(*TestRunner, Probe, FName(TEXT("DestroySelf")));
+		if (!Invoker.IsValid()) return;
+		if (!CheckEqual(*TestRunner, TEXT("Script component should call DestroyComponent successfully"), Invoker.CallAndReturn<int32>(INDEX_NONE), 1)) return;
+
+		ASSERT_THAT(IsTrue(Probe->IsBeingDestroyed(), TEXT("DestroyComponent should mark the script component as being destroyed")));
+		ASSERT_THAT(IsFalse(Probe->IsRegistered(), TEXT("DestroyComponent should unregister the script component")));
+	}
+
+	TEST_METHOD(EndPlayReceivesDestroyedReason)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestComponentLifecycleEndPlayReason"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestComponentLifecycleEndPlayReason.as"),
+			TEXT(R"AS(
+UCLASS()
+class UTestComponentLifecycleEndPlayProbe : UActorComponent
+{
+	UPROPERTY()
+	int EndPlayCount = 0;
+
+	UPROPERTY()
+	EEndPlayReason LastReason = EEndPlayReason::Quit;
+
+	UFUNCTION(BlueprintOverride)
+	void EndPlay(EEndPlayReason Reason)
+	{
+		EndPlayCount += 1;
+		LastReason = Reason;
+	}
+}
+
+UCLASS()
+class ATestComponentLifecycleEndPlayReason : AActor
+{
+	UPROPERTY(DefaultComponent)
+	UTestComponentLifecycleEndPlayProbe Probe;
+}
+)AS"),
+			TEXT("ATestComponentLifecycleEndPlayReason"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		UActorComponent* Probe = ReadComponentProperty(*TestRunner, Actor, TEXT("Probe"));
+		if (Probe == nullptr) return;
+
+		W.BeginPlay(*Actor);
+		W.DestroyAndDrain(*Actor);
+
+		int32 EndPlayCount = 0;
+		int64 LastReason = -1;
+		if (!ReadPropertyValue<FIntProperty>(*TestRunner, Probe, TEXT("EndPlayCount"), EndPlayCount)
+			|| !GetEnumByPath(*TestRunner, Probe, TEXT("LastReason"), LastReason))
+		{
+			return;
+		}
+
+		ASSERT_THAT(AreEqual(1, EndPlayCount, TEXT("Component EndPlay should run exactly once when the owning actor is destroyed")));
+		ASSERT_THAT(AreEqual(static_cast<int64>(EEndPlayReason::Destroyed), LastReason, TEXT("Component EndPlay should receive EEndPlayReason::Destroyed")));
+	}
+};
+
+TEST_CLASS_WITH_FLAGS(FAngelscriptDefaultComponentExtendedTest,
+	"Angelscript.TestModule.Component.DefaultComponent.Extended",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+{
+	template <typename ValueType>
+	static bool CheckNotNull(FAutomationTestBase& Test, const TCHAR* Message, const ValueType& Value)
+	{
+		FNoDiscardAsserter LocalAssert(Test);
+		return LocalAssert.IsNotNull(Value, Message);
+	}
+
+	template <typename ComponentType = UActorComponent>
+	static ComponentType* ReadComponentProperty(FAutomationTestBase& Test, UObject* Object, const TCHAR* PropertyName)
+	{
+		UObject* ComponentObject = nullptr;
+		if (!GetObjectByPath(Test, Object, PropertyName, ComponentObject))
+		{
+			return nullptr;
+		}
+
+		ComponentType* Component = Cast<ComponentType>(ComponentObject);
+		(void)CheckNotNull(
+			Test,
+			*FString::Printf(TEXT("Property '%s' should point to the expected component type"), PropertyName),
+			Component);
+		return Component;
+	}
+
+	static UActorComponent* FindComponentByName(AActor* Actor, FName ComponentName)
+	{
+		if (Actor == nullptr)
+		{
+			return nullptr;
+		}
+
+		for (UActorComponent* Component : Actor->GetComponents())
+		{
+			if (Component != nullptr && Component->GetFName() == ComponentName)
+			{
+				return Component;
+			}
+		}
+
+		return nullptr;
+	}
+
+	BEFORE_ALL()
+	{
+		ASTEST_CREATE_ENGINE();
+	}
+
+	AFTER_ALL()
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		ASTEST_RESET_ENGINE(Engine);
+	}
+
+	TEST_METHOD(DefaultComponentPropertiesPointToInstances)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestDefaultComponentExtendedProperties"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestDefaultComponentExtendedProperties.as"),
+			TEXT(R"AS(
+UCLASS()
+class ATestDefaultComponentExtendedProperties : AActor
+{
+	UPROPERTY(DefaultComponent, RootComponent)
+	USceneComponent Root;
+
+	UPROPERTY(DefaultComponent, Attach = Root)
+	USceneComponent Child;
+}
+)AS"),
+			TEXT("ATestDefaultComponentExtendedProperties"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		USceneComponent* Root = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("Root"));
+		USceneComponent* Child = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("Child"));
+		if (Root == nullptr || Child == nullptr) return;
+
+		ASSERT_THAT(AreEqual(Actor->GetRootComponent(), Root, TEXT("Root DefaultComponent property should point to the actor root component")));
+		ASSERT_THAT(AreEqual(Root, Child->GetAttachParent(), TEXT("Child DefaultComponent property should point to an attached instance")));
+		ASSERT_THAT(AreEqual(EComponentCreationMethod::Native, Root->CreationMethod, TEXT("Root DefaultComponent should use native default-subobject creation method")));
+		ASSERT_THAT(AreEqual(EComponentCreationMethod::Native, Child->CreationMethod, TEXT("Child DefaultComponent should use native default-subobject creation method")));
+		ASSERT_THAT(AreEqual(FName(TEXT("Root")), Root->GetFName(), TEXT("Root component property should have the scripted component name")));
+		ASSERT_THAT(AreEqual(FName(TEXT("Child")), Child->GetFName(), TEXT("Child component property should have the scripted component name")));
+	}
+
+	TEST_METHOD(ScriptedRootAndAttachedBillboardMaterialize)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestDefaultComponentCoverageHierarchy"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestDefaultComponentCoverageHierarchy.as"),
+			TEXT(R"AS(
+UCLASS()
+class UTestCoverageRootComponent : USceneComponent
+{
+}
+
+UCLASS()
+class UTestCoverageBillboardComponent : UBillboardComponent
+{
+}
+
+UCLASS()
+class ATestDefaultComponentCoverageHierarchy : AActor
+{
+	UPROPERTY(DefaultComponent, RootComponent)
+	UTestCoverageRootComponent ScriptedRoot;
+
+	UPROPERTY(DefaultComponent, Attach = ScriptedRoot)
+	UTestCoverageBillboardComponent AttachedBillboard;
+}
+)AS"),
+			TEXT("ATestDefaultComponentCoverageHierarchy"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		USceneComponent* ScriptedRoot = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("ScriptedRoot"));
+		UBillboardComponent* AttachedBillboard = ReadComponentProperty<UBillboardComponent>(*TestRunner, Actor, TEXT("AttachedBillboard"));
+		if (ScriptedRoot == nullptr || AttachedBillboard == nullptr) return;
+
+		UClass* RootClass = FindGeneratedClass(&Engine, TEXT("UTestCoverageRootComponent"));
+		UClass* BillboardClass = FindGeneratedClass(&Engine, TEXT("UTestCoverageBillboardComponent"));
+		if (!CheckNotNull(*TestRunner, TEXT("Scripted root component class should be generated"), RootClass)
+			|| !CheckNotNull(*TestRunner, TEXT("Scripted billboard component class should be generated"), BillboardClass))
+		{
+			return;
+		}
+
+		ASSERT_THAT(AreEqual(Actor->GetRootComponent(), ScriptedRoot, TEXT("Scripted root property should point at the actor root")));
+		ASSERT_THAT(IsTrue(ScriptedRoot->IsA(RootClass), TEXT("Scripted root should use the generated component class")));
+		ASSERT_THAT(IsTrue(AttachedBillboard->IsA(BillboardClass), TEXT("Attached billboard should use the generated billboard class")));
+		ASSERT_THAT(AreEqual(ScriptedRoot, AttachedBillboard->GetAttachParent(),
+			TEXT("Attached billboard should preserve the scripted attach hierarchy")));
+	}
+
+	TEST_METHOD(AttachSocketPersistsAtRuntime)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestDefaultComponentExtendedAttachSocket"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestDefaultComponentExtendedAttachSocket.as"),
+			TEXT(R"AS(
+UCLASS()
+class ATestDefaultComponentExtendedAttachSocket : AActor
+{
+	UPROPERTY(DefaultComponent, RootComponent)
+	USceneComponent Root;
+
+	UPROPERTY(DefaultComponent, Attach = Root, AttachSocket = "NamedSocket")
+	USceneComponent Child;
+}
+)AS"),
+			TEXT("ATestDefaultComponentExtendedAttachSocket"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		USceneComponent* Root = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("Root"));
+		USceneComponent* Child = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("Child"));
+		if (Root == nullptr || Child == nullptr) return;
+
+		ASSERT_THAT(AreEqual(Root, Child->GetAttachParent(), TEXT("AttachSocket child should attach to the declared parent")));
+		ASSERT_THAT(AreEqual(FName(TEXT("NamedSocket")), Child->GetAttachSocketName(), TEXT("AttachSocket metadata should persist to the runtime scene attachment")));
+	}
+
+	TEST_METHOD(OverrideComponentMaterializesReplacement)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestDefaultComponentExtendedOverride"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestDefaultComponentExtendedOverride.as"),
+			TEXT(R"AS(
+UCLASS()
+class ATestDefaultComponentExtendedOverrideBase : AActor
+{
+	UPROPERTY(DefaultComponent, RootComponent)
+	USceneComponent Root;
+
+	UPROPERTY(DefaultComponent, Attach = Root)
+	USceneComponent BaseChild;
+}
+
+UCLASS()
+class ATestDefaultComponentExtendedOverrideChild : ATestDefaultComponentExtendedOverrideBase
+{
+	UPROPERTY(OverrideComponent = BaseChild)
+	UStaticMeshComponent Replacement;
+}
+)AS"),
+			TEXT("ATestDefaultComponentExtendedOverrideChild"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		USceneComponent* Root = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("Root"));
+		UStaticMeshComponent* ReplacementProperty = ReadComponentProperty<UStaticMeshComponent>(*TestRunner, Actor, TEXT("Replacement"));
+		UActorComponent* BaseChildComponent = FindComponentByName(Actor, TEXT("BaseChild"));
+		if (Root == nullptr || ReplacementProperty == nullptr || !CheckNotNull(*TestRunner, TEXT("Overridden BaseChild component should exist by its base component name"), BaseChildComponent)) return;
+
+		UStaticMeshComponent* ReplacementInstance = Cast<UStaticMeshComponent>(BaseChildComponent);
+		if (!CheckNotNull(*TestRunner, TEXT("OverrideComponent should materialize BaseChild as a UStaticMeshComponent"), ReplacementInstance)) return;
+
+		ASSERT_THAT(AreEqual(ReplacementInstance, ReplacementProperty, TEXT("OverrideComponent property should point at the replaced base component instance")));
+		ASSERT_THAT(AreEqual(FName(TEXT("BaseChild")), ReplacementInstance->GetFName(), TEXT("OverrideComponent should preserve the base component object name")));
+		ASSERT_THAT(AreEqual(Root, ReplacementInstance->GetAttachParent(), TEXT("OverrideComponent replacement should keep the base attachment parent")));
+	}
+
+	TEST_METHOD(NativeActorExtraComponentAttachesToInheritedRoot)
+	{
+		FAngelscriptEngine& Engine = ASTEST_GET_ENGINE();
+		FAngelscriptEngineScope Scope(Engine);
+		static const FName ModuleName(TEXT("TestDefaultComponentExtendedNativeRoot"));
+		ON_SCOPE_EXIT { Engine.DiscardModule(*ModuleName.ToString()); };
+
+		UClass* ActorClass = CompileScriptModule(*TestRunner, Engine, ModuleName,
+			TEXT("TestDefaultComponentExtendedNativeRoot.as"),
+			TEXT(R"AS(
+UCLASS()
+class ATestDefaultComponentExtendedNativeRoot : ACharacter
+{
+	UPROPERTY(DefaultComponent)
+	USceneComponent ExtraMarker;
+}
+)AS"),
+			TEXT("ATestDefaultComponentExtendedNativeRoot"));
+		if (ActorClass == nullptr) return;
+
+		FAngelscriptTestWorld W(*TestRunner, Engine);
+		if (!W.IsValid()) return;
+		AActor* Actor = W.SpawnActorOfClass(ActorClass);
+		if (!CheckNotNull(*TestRunner, TEXT("Actor should spawn"), Actor)) return;
+
+		USceneComponent* ExtraMarker = ReadComponentProperty<USceneComponent>(*TestRunner, Actor, TEXT("ExtraMarker"));
+		USceneComponent* InheritedRoot = Actor->GetRootComponent();
+		if (ExtraMarker == nullptr || !CheckNotNull(*TestRunner, TEXT("Native actor should keep its inherited root component"), InheritedRoot)) return;
+
+		ASSERT_THAT(AreNotEqual(InheritedRoot, ExtraMarker, TEXT("Extra script component should not replace the native inherited root")));
+		ASSERT_THAT(AreEqual(InheritedRoot, ExtraMarker->GetAttachParent(), TEXT("Extra script component should attach to the native inherited root")));
+		ASSERT_THAT(AreEqual(FName(TEXT("ExtraMarker")), ExtraMarker->GetFName(), TEXT("Extra script component should preserve its script property name")));
+	}
+};
+
+#endif // WITH_ANGELSCRIPT_UNITTESTS
