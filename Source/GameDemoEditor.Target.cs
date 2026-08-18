@@ -13,3 +13,4 @@ public class GameDemoEditorTarget : TargetRules
 		ExtraModuleNames.Add("GameDemo");
 	}
 }
+ 

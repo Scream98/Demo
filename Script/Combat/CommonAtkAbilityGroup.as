@@ -3,7 +3,7 @@
 class UCommonAtkAbilityGroup : UCombatScriptBridge
 {
     UFUNCTION(BlueprintOverride)
-    FName GetAttackId(int32 AttackIndex)
+    FName GetAttackId(int32 AttackIndex) const
     {
         if (AttackIndex == 0) return FName("CommonAtk_01");
         if (AttackIndex == 1) return FName("CommonAtk_02");
@@ -11,7 +11,7 @@ class UCommonAtkAbilityGroup : UCombatScriptBridge
     }
 
     UFUNCTION(BlueprintOverride)
-    FName GetAnimationId(int32 AttackIndex)
+    FName GetAnimationId(int32 AttackIndex) const
     {
         if (AttackIndex == 0) return FName("002000");
         if (AttackIndex == 1) return FName("002001");
@@ -19,14 +19,14 @@ class UCommonAtkAbilityGroup : UCombatScriptBridge
     }
 
     UFUNCTION(BlueprintOverride)
-    int32 GetNextAttackIndex(int32 AttackIndex)
+    int32 GetNextAttackIndex(int32 AttackIndex) const
     {
         if (AttackIndex >= 0 && AttackIndex < 2) return AttackIndex + 1;
         return -1;
     }
 
     UFUNCTION(BlueprintOverride)
-    float GetPhaseDuration(int32 AttackIndex, int32 PhaseIndex)
+    float GetPhaseDuration(int32 AttackIndex, int32 PhaseIndex) const
     {
         if (PhaseIndex == 0) return 0.10f;
         if (PhaseIndex == 1) return 0.12f;
