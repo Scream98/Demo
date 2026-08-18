@@ -21,6 +21,8 @@ class GAMEDEMO_API UCombatScriptBridge : public UObject
 	GENERATED_BODY()
 
 public:
+	virtual void BeginDestroy() override;
+
 	void Initialize(ACS* InCharacter);
 	void Shutdown();
 

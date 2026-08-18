@@ -13,6 +13,8 @@
 #include "GameFramework/Controller.h"
 #include "Math/RotationMatrix.h"
 #include "UObject/UObjectGlobals.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 
 // Sets default values
 ACS::ACS()
@@ -37,6 +39,9 @@ void ACS::BeginPlay()
 {
 	Super::BeginPlay();
 
+	UE_LOG(LogTemp, Log, TEXT("[Combat] Character=%s CharacterId=%s Faction=%s Profile=%s AbilitySet=%s"),
+		*GetName(), *CharacterId.ToString(), *FactionId.ToString(), *CombatProfileId.ToString(), *AbilitySetId.ToString());
+
 	CombatAbilitySystemComponent->InitAbilityActorInfo(this, this);
 	InitializeCombatScriptBridge();
 	GrantCommonAttackAbilities();
@@ -54,10 +59,14 @@ void ACS::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
+	if (!bEnablePlayerCombatInput)
+	{
+		return;
+	}
+
 	PlayerInputComponent->BindAction(TEXT("CommonAtk"), IE_Pressed, this, &ACS::HandleCommonAtkInput);
-	PlayerInputComponent->BindAxis(TEXT("MoveForward"), this, &ACS::MoveForward);
+	PlayerInputComponent->BindAxis(TEXT("Move Forward / Backward"), this, &ACS::MoveForward);
 	PlayerInputComponent->BindAxis(TEXT("Move Right / Left"), this, &ACS::MoveRight);
-	PlayerInputComponent->BindAxis(TEXT("MoveRight"), this, &ACS::MoveRight);
 
 }
 
@@ -115,6 +124,57 @@ void ACS::NotifyCommonAttackAbilityEnded(UScriptDrivenGameplayAbility* Ability)
 	}
 }
 
+void ACS::DrawTemporaryCombatDebug(const int32 AttackIndex, const int32 PhaseIndex, const float Duration)
+{
+	if (!bEnableTemporaryCombatDebug || GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	static const FColor PhaseColors[] =
+	{
+		FColor(235, 70, 70),
+		FColor(245, 150, 55),
+		FColor(70, 220, 120),
+		FColor(70, 150, 245)
+	};
+	const FColor Color = PhaseColors[FMath::Clamp(PhaseIndex, 0, UE_ARRAY_COUNT(PhaseColors) - 1)];
+	const FVector Origin = GetActorLocation() + FVector(0.0f, 0.0f, 45.0f);
+	const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+	const FVector PulseCenter = Origin + Forward * TemporaryCombatDebugReach;
+	const float PulseDuration = FMath::Max(0.05f, Duration);
+
+	DrawDebugSphere(GetWorld(), PulseCenter, TemporaryCombatDebugRadius, 20, Color, false, PulseDuration, 0, 2.5f);
+	DrawDebugDirectionalArrow(GetWorld(), Origin, PulseCenter, 14.0f, Color, false, PulseDuration, 0, 3.0f);
+
+	const FString PhaseName = [&]()
+	{
+		switch (PhaseIndex)
+		{
+		case 0: return FString(TEXT("SingleLaunch"));
+		case 1: return FString(TEXT("AfterLaunch"));
+		case 2: return FString(TEXT("Combo"));
+		case 3: return FString(TEXT("Ending"));
+		default: return FString(TEXT("Unknown"));
+		}
+	}();
+	const FString DebugText = FString::Printf(TEXT("CommonAtk_%02d | %s"), AttackIndex + 1, *PhaseName);
+	DrawDebugString(GetWorld(), Origin + FVector(0.0f, 0.0f, 70.0f), DebugText, this, Color, PulseDuration, true, 1.0f);
+
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()), PulseDuration, Color, DebugText);
+	}
+}
+
+void ACS::ClearTemporaryCombatDebug()
+{
+	if (GEngine != nullptr)
+	{
+		GEngine->RemoveOnScreenDebugMessage(static_cast<uint64>(GetUniqueID()));
+	}
+}
+
 void ACS::GrantCommonAttackAbilities()
 {
 	if (!HasAuthority() || !CombatAbilitySystemComponent)
@@ -139,6 +199,10 @@ void ACS::InitializeCombatScriptBridge()
 	{
 		ScriptClass = UCombatScriptBridge::StaticClass();
 		UE_LOG(LogTemp, Warning, TEXT("[Combat] CommonAtk AngelScript class was not found; using C++ defaults."));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Combat] CommonAtk AngelScript policy loaded: %s"), *ScriptClass->GetPathName());
 	}
 
 	CombatScriptBridge = NewObject<UCombatScriptBridge>(this, ScriptClass);

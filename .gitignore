@@ -81,6 +81,7 @@ Saved/*
 # Local/User specific configuration (do not commit)
 Config/Local*.ini
 Config/User*.ini
+ue-mcp.local.yml
 
 # Compiled source files for the engine to use
 Intermediate/*

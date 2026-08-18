@@ -26,6 +26,12 @@ namespace CombatTags
 	static FGameplayTag Buffered() { return FGameplayTag::RequestGameplayTag(TEXT("State.ComboInputBuffered")); }
 }
 
+void UCombatScriptBridge::BeginDestroy()
+{
+	Shutdown();
+	Super::BeginDestroy();
+}
+
 void UCombatScriptBridge::Initialize(ACS* InCharacter)
 {
 	Character = InCharacter;
@@ -123,7 +129,20 @@ bool UCombatScriptBridge::CanMove() const
 
 bool UCombatScriptBridge::CanStartAttack(const FName& AttackId) const
 {
-	return Character != nullptr && ActiveAbility == nullptr && !AttackId.IsNone();
+	if (Character == nullptr || ActiveAbility != nullptr || AttackId.IsNone())
+	{
+		return false;
+	}
+
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		if (GetAttackId(Index) == AttackId)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void UCombatScriptBridge::PlayAttackAnimation(const FName& AttackId, const FName& AnimationId) const
@@ -167,18 +186,26 @@ void UCombatScriptBridge::SetPhase(const ECombatPhase NewPhase)
 	}
 
 	const FName AttackId = GetAttackId(CurrentAttackIndex);
+	const float Duration = FMath::Max(0.01f, GetPhaseDuration(CurrentAttackIndex, static_cast<int32>(NewPhase)));
 	UE_LOG(LogTemp, Log, TEXT("[Combat] %s Phase=%s"), *AttackId.ToString(), *UEnum::GetValueAsString(NewPhase));
 	if (NewPhase == ECombatPhase::SingleLaunch)
 	{
 		PlayAttackAnimation(AttackId, GetAnimationId(CurrentAttackIndex));
 	}
+	Character->DrawTemporaryCombatDebug(CurrentAttackIndex, static_cast<int32>(NewPhase), Duration);
 	OnPhaseChanged(CurrentAttackIndex, static_cast<int32>(NewPhase));
 
 	if (Character->GetWorld() != nullptr)
 	{
 		Character->GetWorld()->GetTimerManager().ClearTimer(PhaseTimer);
-		const float Duration = FMath::Max(0.01f, GetPhaseDuration(CurrentAttackIndex, static_cast<int32>(NewPhase)));
-		Character->GetWorld()->GetTimerManager().SetTimer(PhaseTimer, this, &UCombatScriptBridge::AdvancePhase, Duration, false);
+		FTimerDelegate PhaseDelegate;
+		PhaseDelegate.BindLambda([this]()
+		{
+			AdvancePhase();
+		});
+		Character->GetWorld()->GetTimerManager().SetTimer(PhaseTimer, PhaseDelegate, Duration, false);
+		UE_LOG(LogTemp, Verbose, TEXT("[Combat] PhaseTimer Attack=%s Duration=%.2f World=%s"),
+			*AttackId.ToString(), Duration, *Character->GetWorld()->GetName());
 	}
 }
 
@@ -231,6 +258,7 @@ void UCombatScriptBridge::FinishCurrentAttack(const bool bWasCancelled)
 	if (Character != nullptr && Character->GetWorld() != nullptr)
 	{
 		Character->GetWorld()->GetTimerManager().ClearTimer(PhaseTimer);
+		Character->ClearTemporaryCombatDebug();
 	}
 
 	UScriptDrivenGameplayAbility* Ability = ActiveAbility;
